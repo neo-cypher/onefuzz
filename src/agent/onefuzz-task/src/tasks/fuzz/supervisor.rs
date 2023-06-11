@@ -203,6 +203,24 @@ async fn start_supervisor(
         None
     };
 
+    #[cfg(target_os = 'windows')]
+    if let Some(target_exe) = target_exe {
+        // set up a .local file on Windows before invoking the executable
+        // so that all DLLs are resolved to the exe’s folder
+        // in preference to the Windows/system DLLs
+        let mut local_file_name = target_exe.file_name().expect("exe file name").to_owned();
+        local_file_name.push(".local");
+        // the .local file is an empty file that tells DLL resolution to consider the same directory,
+        // even for system (or KnownDLL) files
+        // https://learn.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-redirection#how-to-redirect-dlls-for-unpackaged-apps
+        if let Err(e) = tokio::fs::write(target_exe.with_file_name(local_file_name), &[]).await {
+            // ignore already-exists error, report anything else
+            if e.kind() != std::io::ErrorKind::AlreadyExists {
+                return Err(anyhow::Error::from(e).context("creating .local file"));
+            }
+        }
+    }
+
     let expand = Expand::new(&config.common.machine_identity)
         .machine_id()
         .supervisor_exe(&config.supervisor_exe)
